@@ -31,7 +31,15 @@ def compute_saliency_maps(X, y, model):
     # to each input image. You first want to compute the loss over the correct   #
     # scores, and then compute the gradients with torch.autograd.gard.           #
     ##############################################################################
-    pass
+    scores=model(X)
+    correct_scores=scores.gather(1,y.view(-1,1)).squeeze()
+    loss=-correct_scores
+    #minimize the loss->maximize the scores
+    
+    gradient=torch.autograd.grad(loss,X)
+   
+    saliency=torch.max(gradient.abs(),axis=1)
+    
     ##############################################################################
     #                             END OF YOUR CODE                               #
     ##############################################################################
@@ -69,7 +77,20 @@ def make_fooling_image(X, target_y, model):
     # in fewer than 100 iterations of gradient ascent.                           #
     # You can print your progress over iterations to check your algorithm.       #
     ##############################################################################
-    pass
+    for i in range(100):
+        scores=model(X_fooling)
+
+        target_scores=scores.gather(1,y.view(-1,1)).squeeze()
+        loss=-target_scores
+        
+        grad=torch.autograd.grad(loss,X)
+        X_fooling.data+=learning_rate*(grad/grad.norm())
+        
+        correct_idx=torch.argmax(scores,dim=1)
+        
+        if correct_idx[0]=target_y:
+            break
+           
     ##############################################################################
     #                             END OF YOUR CODE                               #
     ##############################################################################
@@ -98,7 +119,15 @@ def update_class_visulization(model, target_y, l2_reg, learning_rate, img):
     # L2 regularization term!                                              #
     # Be very careful about the signs of elements in your code.            #
     ########################################################################
-    pass
+    scores=model(img)
+    target_scores=scores.gather(1,y.view(-1,1)).squeeze()
+    loss=-target_scores
+    grad=torch.autograd.grad(loss,X)
+    #add regularizer
+    grad-=2*l2_reg*img.abs()
+    
+    img+=learning_rate*(grad/grad.norm())
+    
     ########################################################################
     #                             END OF YOUR CODE                         #
     ########################################################################

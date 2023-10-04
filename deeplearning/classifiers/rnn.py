@@ -42,31 +42,32 @@ class CaptioningRNN(object):
         self.idx_to_word = {i: w for w, i in word_to_idx.items()}
         self.params = {}
 
-        vocab_size = len(word_to_idx)
+        vocab_size = len(word_to_idx)#V
 
         self._null = word_to_idx['<NULL>']
         self._start = word_to_idx.get('<START>', None)
         self._end = word_to_idx.get('<END>', None)
+        #若没有start和end则返回None
 
         # Initialize word vectors
-        self.params['W_embed'] = np.random.randn(vocab_size, wordvec_dim)
+        self.params['W_embed'] = np.random.randn(vocab_size, wordvec_dim)#[V,W]
         self.params['W_embed'] /= 100
 
         # Initialize CNN -> hidden state projection parameters
-        self.params['W_proj'] = np.random.randn(input_dim, hidden_dim)
+        self.params['W_proj'] = np.random.randn(input_dim, hidden_dim)#[D,H]
         self.params['W_proj'] /= np.sqrt(input_dim)
         self.params['b_proj'] = np.zeros(hidden_dim)
 
         # Initialize parameters for the RNN
         dim_mul = {'lstm': 4, 'rnn': 1}[cell_type]
-        self.params['Wx'] = np.random.randn(wordvec_dim, dim_mul * hidden_dim)
+        self.params['Wx'] = np.random.randn(wordvec_dim, dim_mul * hidden_dim)#[W,H/4H]
         self.params['Wx'] /= np.sqrt(wordvec_dim)
-        self.params['Wh'] = np.random.randn(hidden_dim, dim_mul * hidden_dim)
+        self.params['Wh'] = np.random.randn(hidden_dim, dim_mul * hidden_dim)#[H,H/4H]
         self.params['Wh'] /= np.sqrt(hidden_dim)
-        self.params['b'] = np.zeros(dim_mul * hidden_dim)
+        self.params['b'] = np.zeros(dim_mul * hidden_dim)#H/4H
 
         # Initialize output to vocab weights
-        self.params['W_vocab'] = np.random.randn(hidden_dim, vocab_size)
+        self.params['W_vocab'] = np.random.randn(hidden_dim, vocab_size)#[H,V]
         self.params['W_vocab'] /= np.sqrt(hidden_dim)
         self.params['b_vocab'] = np.zeros(vocab_size)
 
@@ -97,7 +98,9 @@ class CaptioningRNN(object):
         # after receiving word t. The first element of captions_in will be the START
         # token, and the first element of captions_out will be the first word.
         captions_in = captions[:, :-1]
+        #它移除了每个句子的最后一个单词，将其作为输入序列
         captions_out = captions[:, 1:]
+        #句子中的第一个单词移除，并将其作为目标序列
 
         # You'll need this
         mask = (captions_out != self._null)
@@ -137,7 +140,45 @@ class CaptioningRNN(object):
         # defined above to store loss and gradients; grads[k] should give the      #
         # gradients for self.params[k].                                            #
         ############################################################################
-        pass
+        h0,cache_h0=affine_forward(features,W_proj,b_proj)#feature [N,D]->[N,H]
+        embed,cache_embed=word_embedding_forward(captions_in,W_embed)
+        #[N,T]->[N,T,W]
+        
+        if self.cell_type=='rnn':
+            h_out,cache_cell = rnn_forward(embed,h0,Wx,Wh,b)
+            #[N,T,H]
+        elif self.cell_type=='lstm':
+            h_out,cache_cell = lstm_forward(embed,h0,Wx,Wh,b)
+            
+        scores,cache_scores = temporal_affine_forward(h_out,W_vocab,b_vocab)
+        #[N,T,V]
+        
+        loss,dout=temporal_softmax_loss(scores,captions_out,mask)
+                                       #[N,T,V]  [N,T]
+            
+        #-----backward-----#
+        dh_out,dW_vocab,db_vocab=temporal_affine_backward(dout,cache_scores)
+        
+        if self.cell_type=='rnn':
+            dembed,dh0,dWx,dWh,db = rnn_backward(dh_out,cache_cell)
+        elif self.cell_type=='lstm':
+            dembed,dh0,dWx,dWh,db = lstm_backward(dh_out,cache_cell)
+        
+        dW_embed=word_embedding_backward(demded,cache_emded)
+        dh0,dW_proj,db_proj=affine_backward(dh0,cache_h0)
+        
+        grads['W_vocab']=dW_vocab
+        grads['b_vocab']=db_vocab
+        
+        grads['Wx']=dWx
+        grads['Wh']=dWh
+        grads['b']=db
+        
+        grads['W_embed']=dW_embed
+        
+        grads['W_proj']=dW_proj
+        grads['b_proj']=db_proj
+         
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -171,6 +212,8 @@ class CaptioningRNN(object):
         """
         N = features.shape[0]
         captions = self._null * np.ones((N, max_length), dtype=np.int32)
+        #null特殊的标记，通常用于填充序列或表示占位符
+        #max_length----T
 
         # Unpack parameters
         W_proj, b_proj = self.params['W_proj'], self.params['b_proj']
@@ -199,7 +242,36 @@ class CaptioningRNN(object):
         # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
         # a loop.                                                                 #
         ###########################################################################
-        pass
+        h0,_=affine_forward(features,W_proj,b_proj)
+        #[N,H]
+        start=self._start*np.ones((N,1),stype=np.int32)
+        embed,_=word_embeding_forward(start,W_embed)
+        #[N,1]->[N,1,W]
+        c=np.zeros_like(h0)
+        #[N,H]
+        
+        h=h0
+       
+        #captions_out = self._null * np.ones((N, max_length+1), dtype=np.int32)
+      
+        #embed word begin with <start>
+        for i in range(max_length):#loop for each time stage 
+            
+            embed=np.squeeze(embed)
+            #[N,1,W]->[N,W]
+            if self.cell_type=='rnn':
+                h,_=rnn_step_forward(embed,h,Wx,Wh,b)
+            elif self.cell_type=='lstm':
+                h,c,_=lstm_step_forward(embed,h,c,Wx,Wh,b)
+                
+            scores,_=affine_forward(h,W_vocab,b_vocab)
+            #[N,V]
+            captions[:,i]=argmax(scores,axis=1)#N
+            #get output result for all inputs in same time stage
+            
+            #output for all inputs in same time stage will behave as next loop input
+            embed,_word_embeding_forward(captions[:,i,None],W_embed) 
+         
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
